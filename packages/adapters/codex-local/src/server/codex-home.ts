@@ -46,11 +46,18 @@ async function ensureSymlink(target: string, source: string): Promise<void> {
   const existing = await fs.lstat(target).catch(() => null);
   if (!existing) {
     await ensureParentDir(target);
-    await fs.symlink(source, target);
+    try {
+      await fs.symlink(source, target);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException | null)?.code !== "EEXIST") throw error;
+      await ensureSymlink(target, source);
+    }
     return;
   }
 
   if (!existing.isSymbolicLink()) {
+    await fs.unlink(target);
+    await fs.symlink(source, target);
     return;
   }
 

@@ -6,6 +6,16 @@ const PLUGIN_NAME = "file-browser-example";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PATH_LIKE_PATTERN = /[\\/]/;
 const WINDOWS_DRIVE_PATH_PATTERN = /^[A-Za-z]:[\\/]/;
+const IMAGE_MIME_TYPES: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+  ".bmp": "image/bmp",
+  ".ico": "image/x-icon",
+};
 
 function looksLikePath(value: string): boolean {
   const normalized = value.trim();
@@ -25,6 +35,31 @@ function resolveWorkspace(workspacePath: string, requestedPath?: string): string
     return null;
   }
   return resolved;
+}
+
+function imageMimeType(filePath: string): string | null {
+  const ext = path.extname(filePath).toLowerCase();
+  return IMAGE_MIME_TYPES[ext] ?? null;
+}
+
+async function resolvePluginWorkspace(
+  ctx: Parameters<Parameters<typeof definePlugin>[0]["setup"]>[0],
+  projectId: string,
+  companyId: string,
+  workspaceId?: string,
+) {
+  const workspaces = await ctx.projects.listWorkspaces(projectId, companyId);
+  if (workspaceId) {
+    const matched = workspaces.find((workspace) => workspace.id === workspaceId);
+    if (matched) return matched;
+  }
+  if (workspaces.length > 0) {
+    return workspaceId ? null : workspaces[0];
+  }
+  const primaryWorkspace = await ctx.projects.getPrimaryWorkspace(projectId, companyId);
+  if (!primaryWorkspace) return null;
+  if (workspaceId && primaryWorkspace.id !== workspaceId) return null;
+  return primaryWorkspace;
 }
 
 /**
@@ -97,7 +132,15 @@ const plugin = definePlugin({
       const companyId = typeof params.companyId === "string" ? params.companyId : "";
       if (!projectId || !companyId) return [];
       const workspaces = await ctx.projects.listWorkspaces(projectId, companyId);
-      return workspaces.map((w) => ({
+      const primaryWorkspace = workspaces.length > 0
+        ? null
+        : await ctx.projects.getPrimaryWorkspace(projectId, companyId);
+      const resolvedWorkspaces = workspaces.length > 0
+        ? workspaces
+        : primaryWorkspace
+          ? [primaryWorkspace]
+          : [];
+      return resolvedWorkspaces.map((w) => ({
         id: w.id,
         projectId: w.projectId,
         name: w.name,
@@ -114,8 +157,7 @@ const plugin = definePlugin({
         const workspaceId = params.workspaceId as string;
         const directoryPath = typeof params.directoryPath === "string" ? params.directoryPath : "";
         if (!projectId || !companyId || !workspaceId) return { entries: [] };
-        const workspaces = await ctx.projects.listWorkspaces(projectId, companyId);
-        const workspace = workspaces.find((w) => w.id === workspaceId);
+        const workspace = await resolvePluginWorkspace(ctx, projectId, companyId, workspaceId);
         if (!workspace) return { entries: [] };
         const workspacePath = sanitizeWorkspacePath(workspace.path);
         if (!workspacePath) return { entries: [] };
@@ -154,8 +196,7 @@ const plugin = definePlugin({
         if (!projectId || !companyId || !workspaceId || !filePath) {
           return { content: null, error: "Missing file context" };
         }
-        const workspaces = await ctx.projects.listWorkspaces(projectId, companyId);
-        const workspace = workspaces.find((w) => w.id === workspaceId);
+        const workspace = await resolvePluginWorkspace(ctx, projectId, companyId, workspaceId);
         if (!workspace) return { content: null, error: "Workspace not found" };
         const workspacePath = sanitizeWorkspacePath(workspace.path);
         if (!workspacePath) return { content: null, error: "Workspace has no path" };
@@ -164,8 +205,19 @@ const plugin = definePlugin({
           return { content: null, error: "Path outside workspace" };
         }
         try {
+          const mimeType = imageMimeType(fullPath);
+          if (mimeType) {
+            const file = fs.readFileSync(fullPath);
+            return {
+              kind: "image",
+              content: null,
+              mimeType,
+              dataUrl: `data:${mimeType};base64,${file.toString("base64")}`,
+            };
+          }
+
           const content = fs.readFileSync(fullPath, "utf-8");
-          return { content };
+          return { kind: "text", content };
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           return { content: null, error: message };
@@ -187,8 +239,7 @@ const plugin = definePlugin({
         if (!projectId || !companyId || !workspaceId) {
           throw new Error("Missing workspace context");
         }
-        const workspaces = await ctx.projects.listWorkspaces(projectId, companyId);
-        const workspace = workspaces.find((w) => w.id === workspaceId);
+        const workspace = await resolvePluginWorkspace(ctx, projectId, companyId, workspaceId);
         if (!workspace) {
           throw new Error("Workspace not found");
         }

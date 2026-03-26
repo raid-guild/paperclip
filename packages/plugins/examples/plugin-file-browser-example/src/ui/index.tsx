@@ -129,6 +129,13 @@ const editorLightHighlightStyle = HighlightStyle.define([
 
 type Workspace = { id: string; projectId: string; name: string; path: string; isPrimary: boolean };
 type FileEntry = { name: string; path: string; isDirectory: boolean };
+type FileContentResult = {
+  kind?: "text" | "image";
+  content: string | null;
+  error?: string;
+  mimeType?: string;
+  dataUrl?: string;
+};
 type FileTreeNodeProps = {
   entry: FileEntry;
   companyId: string | null;
@@ -142,6 +149,7 @@ type FileTreeNodeProps = {
 const PathLikePattern = /[\\/]/;
 const WindowsDrivePathPattern = /^[A-Za-z]:[\\/]/;
 const UuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const IMAGE_EXTENSION_PATTERN = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i;
 
 function isLikelyPath(pathValue: string): boolean {
   const trimmed = pathValue.trim();
@@ -159,6 +167,10 @@ function workspaceLabel(workspace: Workspace): string {
   }
 
   return workspace.isPrimary ? `${baseLabel} (primary)` : baseLabel;
+}
+
+function isImagePath(filePath: string | null): boolean {
+  return typeof filePath === "string" && IMAGE_EXTENSION_PATTERN.test(filePath);
 }
 
 function useIsMobile(breakpointPx = 768): boolean {
@@ -476,7 +488,7 @@ export function FilesTab({ context }: PluginDetailTabProps) {
         : null,
     [companyId, projectId, selectedWorkspace, selectedPath],
   );
-  const fileContentResult = usePluginData<{ content: string | null; error?: string }>(
+  const fileContentResult = usePluginData<FileContentResult>(
     "fileContent",
     fileContentParams ?? {},
   );
@@ -490,8 +502,17 @@ export function FilesTab({ context }: PluginDetailTabProps) {
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [mobileView, setMobileView] = useState<"browser" | "editor">("browser");
+  const selectedFileIsImage = isImagePath(selectedPath);
+  const imageDataUrl = fileContentData?.kind === "image" ? fileContentData.dataUrl ?? null : null;
 
   useEffect(() => {
+    if (selectedFileIsImage) {
+      if (viewRef.current) {
+        viewRef.current.destroy();
+        viewRef.current = null;
+      }
+      return;
+    }
     if (!editorRef.current) return;
     const content = fileContentData?.content ?? "";
     loadedContentRef.current = content;
@@ -524,14 +545,14 @@ export function FilesTab({ context }: PluginDetailTabProps) {
       view.destroy();
       viewRef.current = null;
     };
-  }, [fileContentData?.content, selectedPath, isDarkMode]);
+  }, [fileContentData?.content, selectedFileIsImage, selectedPath, isDarkMode]);
 
   useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "s") {
         return;
       }
-      if (!selectedWorkspace || !selectedPath || !isDirty || isSaving) {
+      if (!selectedWorkspace || !selectedPath || selectedFileIsImage || !isDirty || isSaving) {
         return;
       }
       event.preventDefault();
@@ -540,7 +561,7 @@ export function FilesTab({ context }: PluginDetailTabProps) {
 
     window.addEventListener("keydown", handleKeydown);
     return () => window.removeEventListener("keydown", handleKeydown);
-  }, [selectedWorkspace, selectedPath, isDirty, isSaving]);
+  }, [selectedWorkspace, selectedPath, selectedFileIsImage, isDirty, isSaving]);
 
   async function handleSave() {
     if (!selectedWorkspace || !selectedPath || !viewRef.current) {
@@ -658,7 +679,7 @@ export function FilesTab({ context }: PluginDetailTabProps) {
               <button
                 type="button"
                 className="rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={!selectedWorkspace || !selectedPath || !isDirty || isSaving}
+                disabled={!selectedWorkspace || !selectedPath || selectedFileIsImage || !isDirty || isSaving}
                 onClick={() => void handleSave()}
               >
                 {isSaving ? "Saving..." : "Save"}
@@ -679,7 +700,38 @@ export function FilesTab({ context }: PluginDetailTabProps) {
           {selectedPath && fileContentData?.error && fileContentData.error !== "Missing file context" ? (
             <div className="border-b border-border px-4 py-2 text-xs text-destructive">{fileContentData.error}</div>
           ) : null}
-          <div ref={editorRef} className="min-h-0 flex-1 overflow-auto overscroll-contain" />
+          {selectedFileIsImage ? (
+            <div className="min-h-0 flex-1 overflow-auto overscroll-contain p-4">
+              {imageDataUrl ? (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-xs text-muted-foreground">
+                      Image preview{fileContentData?.mimeType ? ` • ${fileContentData.mimeType}` : ""}
+                    </div>
+                    <a
+                      href={imageDataUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+                    >
+                      Open image
+                    </a>
+                  </div>
+                  <div className="overflow-hidden rounded-lg border border-border bg-background/50">
+                    <img
+                      src={imageDataUrl}
+                      alt={selectedPath ?? "Selected image"}
+                      className="block h-auto max-h-[70vh] w-full object-contain"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="px-1 py-2 text-sm text-muted-foreground">Loading image preview...</div>
+              )}
+            </div>
+          ) : (
+            <div ref={editorRef} className="min-h-0 flex-1 overflow-auto overscroll-contain" />
+          )}
         </div>
       </div>
     </div>
