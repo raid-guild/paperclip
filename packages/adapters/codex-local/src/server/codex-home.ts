@@ -7,6 +7,7 @@ const TRUTHY_ENV_RE = /^(1|true|yes|on)$/i;
 const COPIED_SHARED_FILES = ["config.json", "config.toml", "instructions.md"] as const;
 const SYMLINKED_SHARED_FILES = ["auth.json"] as const;
 const DEFAULT_PAPERCLIP_INSTANCE_ID = "default";
+const RAILWAY_RUNTIME_HOME_DIR = ".paperclip-runtime";
 
 function nonEmpty(value: string | undefined): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -27,15 +28,30 @@ function isWorktreeMode(env: NodeJS.ProcessEnv): boolean {
   return TRUTHY_ENV_RE.test(env.PAPERCLIP_IN_WORKTREE ?? "");
 }
 
+function isTemporaryPath(candidate: string): boolean {
+  const resolved = path.resolve(candidate);
+  const tempRoot = path.resolve(os.tmpdir());
+  return resolved === tempRoot || resolved.startsWith(`${tempRoot}${path.sep}`);
+}
+
+function resolveManagedCodexBaseDir(env: NodeJS.ProcessEnv): string {
+  const paperclipHome = nonEmpty(env.PAPERCLIP_HOME) ?? path.resolve(os.homedir(), ".paperclip");
+  const railwayVolumeMount = nonEmpty(env.RAILWAY_VOLUME_MOUNT_PATH);
+  if (railwayVolumeMount && isTemporaryPath(paperclipHome)) {
+    return path.resolve(railwayVolumeMount, RAILWAY_RUNTIME_HOME_DIR);
+  }
+  return path.resolve(paperclipHome);
+}
+
 export function resolveManagedCodexHomeDir(
   env: NodeJS.ProcessEnv,
   companyId?: string,
 ): string {
-  const paperclipHome = nonEmpty(env.PAPERCLIP_HOME) ?? path.resolve(os.homedir(), ".paperclip");
+  const managedBaseDir = resolveManagedCodexBaseDir(env);
   const instanceId = nonEmpty(env.PAPERCLIP_INSTANCE_ID) ?? DEFAULT_PAPERCLIP_INSTANCE_ID;
   return companyId
-    ? path.resolve(paperclipHome, "instances", instanceId, "companies", companyId, "codex-home")
-    : path.resolve(paperclipHome, "instances", instanceId, "codex-home");
+    ? path.resolve(managedBaseDir, "instances", instanceId, "companies", companyId, "codex-home")
+    : path.resolve(managedBaseDir, "instances", instanceId, "codex-home");
 }
 
 async function ensureParentDir(target: string): Promise<void> {

@@ -5,6 +5,7 @@ const DEFAULT_INSTANCE_ID = "default";
 const INSTANCE_ID_RE = /^[a-zA-Z0-9_-]+$/;
 const PATH_SEGMENT_RE = /^[a-zA-Z0-9_-]+$/;
 const FRIENDLY_PATH_SEGMENT_RE = /[^a-zA-Z0-9._-]+/g;
+const RAILWAY_RUNTIME_HOME_DIR = ".paperclip-runtime";
 
 function expandHomePrefix(value: string): string {
   if (value === "~") return os.homedir();
@@ -18,6 +19,21 @@ export function resolvePaperclipHomeDir(): string {
   return path.resolve(os.homedir(), ".paperclip");
 }
 
+function isTemporaryPath(candidate: string): boolean {
+  const resolved = path.resolve(candidate);
+  const tempRoot = path.resolve(os.tmpdir());
+  return resolved === tempRoot || resolved.startsWith(`${tempRoot}${path.sep}`);
+}
+
+export function resolvePaperclipPersistentHomeDir(): string {
+  const paperclipHome = resolvePaperclipHomeDir();
+  const railwayVolumeMountPath = process.env.RAILWAY_VOLUME_MOUNT_PATH?.trim();
+  if (railwayVolumeMountPath && isTemporaryPath(paperclipHome)) {
+    return path.resolve(expandHomePrefix(railwayVolumeMountPath), RAILWAY_RUNTIME_HOME_DIR);
+  }
+  return paperclipHome;
+}
+
 export function resolvePaperclipInstanceId(): string {
   const raw = process.env.PAPERCLIP_INSTANCE_ID?.trim() || DEFAULT_INSTANCE_ID;
   if (!INSTANCE_ID_RE.test(raw)) {
@@ -28,6 +44,10 @@ export function resolvePaperclipInstanceId(): string {
 
 export function resolvePaperclipInstanceRoot(): string {
   return path.resolve(resolvePaperclipHomeDir(), "instances", resolvePaperclipInstanceId());
+}
+
+export function resolvePaperclipPersistentInstanceRoot(): string {
+  return path.resolve(resolvePaperclipPersistentHomeDir(), "instances", resolvePaperclipInstanceId());
 }
 
 export function resolveDefaultConfigPath(): string {

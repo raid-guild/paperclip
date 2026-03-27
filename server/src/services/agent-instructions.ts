@@ -451,6 +451,12 @@ export function syncInstructionsBundleConfigFromFilePath(
 }
 
 export function agentInstructionsService() {
+  async function repairBundleConfig(agent: AgentLike): Promise<Record<string, unknown>> {
+    const derived = deriveBundleState(agent);
+    const current = await recoverManagedBundleState(agent, derived);
+    return buildPersistedBundleConfig(derived, current);
+  }
+
   async function getBundle(agent: AgentLike): Promise<AgentInstructionsBundle> {
     const state = await recoverManagedBundleState(agent, deriveBundleState(agent));
     if (!state.rootPath) return toBundle(agent, state, []);
@@ -728,6 +734,7 @@ export function agentInstructionsService() {
     writeFile,
     deleteFile,
     exportFiles,
+    repairBundleConfig,
     ensureManagedBundle: ensureWritableBundle,
     materializeManagedBundle,
   };

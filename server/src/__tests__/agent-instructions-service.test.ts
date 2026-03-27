@@ -318,6 +318,45 @@ describe("agent instructions service", () => {
     expect(result.bundle.files.map((file) => file.path)).toEqual(["AGENTS.md"]);
   });
 
+  it("repairs stale managed metadata without writing bundle files", async () => {
+    const paperclipHome = await makeTempDir("paperclip-agent-instructions-repair-config-");
+    const staleRoot = await makeTempDir("paperclip-agent-instructions-repair-config-stale-");
+    cleanupDirs.add(paperclipHome);
+    cleanupDirs.add(staleRoot);
+    process.env.PAPERCLIP_HOME = paperclipHome;
+    process.env.PAPERCLIP_INSTANCE_ID = "test-instance";
+
+    const managedRoot = path.join(
+      paperclipHome,
+      "instances",
+      "test-instance",
+      "companies",
+      "company-1",
+      "agents",
+      "agent-1",
+      "instructions",
+    );
+    await fs.mkdir(managedRoot, { recursive: true });
+    await fs.writeFile(path.join(managedRoot, "AGENTS.md"), "# Managed Agent\n", "utf8");
+
+    const svc = agentInstructionsService();
+    const agent = makeAgent({
+      instructionsBundleMode: "managed",
+      instructionsRootPath: staleRoot,
+      instructionsEntryFile: "docs/MISSING.md",
+      instructionsFilePath: path.join(staleRoot, "docs", "MISSING.md"),
+    });
+
+    const repaired = await svc.repairBundleConfig(agent);
+
+    expect(repaired).toMatchObject({
+      instructionsBundleMode: "managed",
+      instructionsRootPath: managedRoot,
+      instructionsEntryFile: "AGENTS.md",
+      instructionsFilePath: path.join(managedRoot, "AGENTS.md"),
+    });
+  });
+
   it("recovers the managed bundle when stale root metadata is present but mode is missing", async () => {
     const paperclipHome = await makeTempDir("paperclip-agent-instructions-partial-managed-");
     const staleRoot = await makeTempDir("paperclip-agent-instructions-partial-root-");
